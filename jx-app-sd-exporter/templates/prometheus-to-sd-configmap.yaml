@@ -1,0 +1,10 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: networking-metrics-config
+  labels:
+    chart: "{{ .Chart.Name }}-{{ .Chart.Version | replace "+" "_" }}"
+data:
+  export_interval: 2m
+  metrics_address: localhost:10231
+  metrics_collectors: conntrack,socket

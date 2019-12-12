@@ -1,0 +1,31 @@
+targetProjectId:
+cluster:
+  name:
+  zone:
+  location:
+fluentd:
+  image:
+    repository: gcr.io/stackdriver-agents/stackdriver-logging-agent
+    tag: 1.6.17-16060
+    pullPolicy: IfNotPresent
+  resources:
+    limits:
+      cpu: "1"
+      memory: 500Mi
+    requests:
+      cpu: 100m
+      memory: 200Mi
+prometheusToStackdriver:
+  stackdriverMetricsPrefix: "custom.googleapis.com"
+  exportInterval: 120s
+  image:
+    repository: k8s.gcr.io/prometheus-to-sd
+    tag: v0.8.2
+    pullPolicy: IfNotPresent
+  resources:
+    limits:
+      cpu: 3m
+      memory: 20Mi
+    requests:
+      cpu: 1m
+      memory: 20Mi

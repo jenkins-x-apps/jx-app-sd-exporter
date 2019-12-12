@@ -1,0 +1,4 @@
+apiVersion: v1
+description: Stackdriver Exporter App for Jenkins X
+name: jx-app-sd-exporter
+version: 0.1.0-SNAPSHOT

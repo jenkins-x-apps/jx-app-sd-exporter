@@ -1,0 +1,137 @@
+apiVersion: extensions/v1beta1
+kind: DaemonSet
+metadata:
+  name: {{ template "fullname" . }}
+  labels:
+    chart: "{{ .Chart.Name }}-{{ .Chart.Version | replace "+" "_" }}"
+spec:
+  selector:
+    matchLabels:
+      chart: "{{ .Chart.Name }}-{{ .Chart.Version | replace "+" "_" }}"
+  updateStrategy:
+    rollingUpdate:
+      maxUnavailable: 1
+    type: RollingUpdate
+  template:
+    metadata:
+      labels:
+        chart: "{{ .Chart.Name }}-{{ .Chart.Version | replace "+" "_" }}"
+    spec:
+      containers:
+      - name: fluentd-gcp
+        image: "{{ .Values.fluentd.image.repository }}:{{ .Values.fluentd.image.tag }}"
+        imagePullPolicy: "{{ .Values.fluentd.image.pullPolicy }}"
+        env:
+        - name: NODE_NAME
+          valueFrom:
+            fieldRef:
+              apiVersion: v1
+              fieldPath: spec.nodeName
+        - name: K8S_NODE_NAME
+          valueFrom:
+            fieldRef:
+              apiVersion: v1
+              fieldPath: spec.nodeName
+        - name: STACKDRIVER_METADATA_AGENT_URL
+          value: http://$(NODE_NAME):8799
+        livenessProbe:
+          exec:
+            command:
+            - /bin/sh
+            - -c
+            - |2
+
+              LIVENESS_THRESHOLD_SECONDS=${LIVENESS_THRESHOLD_SECONDS:-300}; STUCK_THRESHOLD_SECONDS=${STUCK_THRESHOLD_SECONDS:-900}; if [ ! -e /var/run/google-fluentd/buffers ]; then
+                exit 1;
+              fi; touch -d "${STUCK_THRESHOLD_SECONDS} seconds ago" /tmp/marker-stuck; if [ -z "$(find /var/run/google-fluentd/buffers -type d -newer /tmp/marker-stuck -print -quit)" ]; then
+                rm -rf /var/run/google-fluentd/buffers;
+                exit 1;
+              fi; touch -d "${LIVENESS_THRESHOLD_SECONDS} seconds ago" /tmp/marker-liveness; if [ -z "$(find /var/run/google-fluentd/buffers -type d -newer /tmp/marker-liveness -print -quit)" ]; then
+                exit 1;
+              fi;
+          failureThreshold: 3
+          initialDelaySeconds: 600
+          periodSeconds: 60
+          successThreshold: 1
+          timeoutSeconds: 1
+        resources:
+          limits:
+            cpu: "{{ .Values.fluentd.resources.limits.cpu }}"
+            memory: "{{ .Values.fluentd.resources.limits.memory }}"
+          requests:
+            cpu: "{{ .Values.fluentd.resources.requests.cpu }}"
+            memory: "{{ .Values.fluentd.resources.requests.memory }}"
+        terminationMessagePath: /dev/termination-log
+        terminationMessagePolicy: File
+        volumeMounts:
+        - mountPath: /var/run/google-fluentd
+          name: varrun
+        - mountPath: /var/log
+          name: varlog
+        - mountPath: /var/lib/docker/containers
+          name: varlibdockercontainers
+          readOnly: true
+        - mountPath: /etc/google-fluentd/config.d
+          name: config-volume
+      - name: prometheus-to-sd-exporter
+        image: "{{ .Values.prometheusToStackdriver.image.repository }}:{{ .Values.prometheusToStackdriver.image.tag }}"
+        imagePullPolicy: "{{ .Values.prometheusToStackdriver.image.pullPolicy }}"
+        command:
+        - /monitor
+        - --stackdriver-prefix={{ .Values.prometheusToStackdriver.stackdriverMetricsPrefix }}
+        - --api-override=https://monitoring.googleapis.com/
+        - --source=fluentd:http://localhost:24231?whitelisted=stackdriver_successful_requests_count,stackdriver_failed_requests_count,stackdriver_ingested_entries_count,stackdriver_dropped_entries_count
+        - --pod-id=$(POD_NAME)
+        - --namespace-id=$(POD_NAMESPACE)
+{{- if .Values.targetProjectId }}
+        - --project-id={{ .Values.targetProjectId }}
+{{- end }}
+{{- if .Values.cluster.zone }}
+        - --zone-override={{ .Values.cluster.zone }}
+{{- end }}
+        env:
+        - name: POD_NAME
+          valueFrom:
+            fieldRef:
+              apiVersion: v1
+              fieldPath: metadata.name
+        - name: POD_NAMESPACE
+          valueFrom:
+            fieldRef:
+              apiVersion: v1
+              fieldPath: metadata.namespace
+        resources: {}
+        terminationMessagePath: /dev/termination-log
+        terminationMessagePolicy: File
+      dnsPolicy: Default
+      hostNetwork: true
+      nodeSelector:
+        beta.kubernetes.io/os: linux
+      restartPolicy: Always
+      schedulerName: default-scheduler
+      securityContext: {}
+      serviceAccount: fluentd-gcp
+      serviceAccountName: fluentd-gcp
+      terminationGracePeriodSeconds: 30
+      tolerations:
+      - effect: NoExecute
+        operator: Exists
+      - effect: NoSchedule
+        operator: Exists
+      volumes:
+      - hostPath:
+          path: /var/run/google-fluentd
+          type: ""
+        name: varrun
+      - hostPath:
+          path: /var/log
+          type: ""
+        name: varlog
+      - hostPath:
+          path: /var/lib/docker/containers
+          type: ""
+        name: varlibdockercontainers
+      - configMap:
+          defaultMode: 420
+          name: fluentd-gcp-config
+        name: config-volume
